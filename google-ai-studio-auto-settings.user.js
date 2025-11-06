@@ -9,8 +9,8 @@
 // @grant        none
 // @run-at       document-end
 // @license      MIT
-// @homepageURL  https://github.com/ai-studio-tools/auto-settings
-// @supportURL   https://github.com/ai-studio-tools/auto-settings/issues
+// @homepageURL  https://github.com/Stranmor/google-ai-studio-auto-settings
+// @supportURL   https://github.com/Stranmor/google-ai-studio-auto-settings/issues
 // ==/UserScript==
 
 (function() {
