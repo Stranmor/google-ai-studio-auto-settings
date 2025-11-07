@@ -540,24 +540,25 @@
       style.textContent = `
                 #as-panel {
                     position: fixed !important;
-                    width: 44px !important;
-                    height: 44px !important;
-                    background: #f1f5f9 !important;
-                    border: 2px solid #e2e8f0 !important;
-                    border-radius: 50% !important;
-                    box-shadow: 0 4px 12px rgba(0,0,0,0.15) !important;
+                    width: 28px !important;
+                    height: 28px !important;
+                    background: #ffffff !important;
+                    border: 1px solid #d1d5db !important;
+                    border-radius: 6px !important;
+                    box-shadow: 0 1px 3px rgba(0,0,0,0.1) !important;
                     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif !important;
                     z-index: 999999 !important;
                     cursor: pointer !important;
                     display: flex !important;
                     align-items: center !important;
                     justify-content: center !important;
-                    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.3s !important;
+                    transition: none !important;
                     user-select: none !important;
+                    opacity: 0.85 !important;
                 }
                 #as-panel:hover {
-                    transform: translateY(-3px) scale(1.05) !important;
-                    box-shadow: 0 8px 20px rgba(0,0,0,0.2) !important;
+                    opacity: 1 !important;
+                    border-color: #9ca3af !important;
                 }
                 #as-panel.as-panel--success {
                     background-color: #ecfdf5 !important;
