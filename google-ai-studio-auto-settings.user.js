@@ -1,10 +1,10 @@
 // ==UserScript==
 // @name         Google AI Studio - Auto Settings
 // @namespace    https://github.com/ai-studio-tools
-// @version      7.1
-// @description  Automatically configures model parameters (Temperature, Top-P, Media Resolution) in Google AI Studio with a clean, modern interface
+// @version      7.5
+// @description  Automatically configures model parameters (Temperature, Top-P, Media Resolution) in Google AI Studio with a clean, modern interface. Now supports mobile and all pages!
 // @author       AI Studio Tools
-// @match        https://aistudio.google.com/prompts/*
+// @match        https://aistudio.google.com/*
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=aistudio.google.com
 // @grant        none
 // @run-at       document-end
@@ -42,6 +42,13 @@
         title: "Media resolution",
       },
       promptInput: "ms-autosize-textarea textarea.textarea",
+      mobileSettingsButton: [
+        'button[aria-label="Toggle run settings panel"]',
+        'button.runsettings-toggle-button',
+        'button[iconname="tune"]',
+        'button:has(.material-symbols-outlined:contains("tune"))',
+      ],
+      settingsPanel: '.runsettings-panel, [class*="runsettings-panel"]',
     },
     storage: {
       positionKey: "as-panel-position",
@@ -89,6 +96,14 @@
     },
   };
 
+  const DeviceUtils = {
+    isMobile: () => {
+      return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
+        navigator.userAgent
+      ) || window.innerWidth < 768;
+    },
+  };
+
   // ==================== DOM INTERACTION ====================
   class DOMInteractor {
     static findElementByText(selector, text) {
@@ -103,12 +118,16 @@
 
     static click(element) {
       if (!element) return false;
-      const eventOptions = { bubbles: true, cancelable: true, view: window };
-      element.dispatchEvent(new MouseEvent("mousedown", eventOptions));
-      element.focus?.();
-      element.dispatchEvent(new MouseEvent("mouseup", eventOptions));
-      element.dispatchEvent(new MouseEvent("click", eventOptions));
-      return true;
+      
+      try {
+        // Simple direct click - most reliable method
+        element.click();
+        Logger.log("Click executed");
+        return true;
+      } catch (e) {
+        Logger.error("Click failed:", e);
+        return false;
+      }
     }
 
     static setValue(element, value) {
@@ -126,10 +145,37 @@
       return true;
     }
 
+    static isSettingsPanelOpen() {
+      // Check if temperature control is available - most reliable indicator
+      const tempContainer = document.querySelector(
+        CONFIG.selectors.temperature.container
+      ) || DOMInteractor.findElementByText("h3", CONFIG.selectors.temperature.title);
+      
+      if (tempContainer) {
+        const tempInput = tempContainer.querySelector('input[type="number"]');
+        if (tempInput && tempInput.offsetParent !== null) {
+          return true;
+        }
+      }
+      
+      // Fallback: check for any h3 settings headers
+      const settingsHeaders = document.querySelectorAll('h3');
+      for (const header of settingsHeaders) {
+        const text = header.textContent.trim();
+        if ((text === 'Temperature' || text === 'Top P' || text === 'Top-P') && 
+            header.offsetParent !== null) {
+          return true;
+        }
+      }
+      
+      return false;
+    }
+
     static isPageLoaded() {
       return (
-        document.querySelector(CONFIG.selectors.promptInput) !== null &&
-        document.querySelector("h3") !== null
+        document.querySelector(CONFIG.selectors.promptInput) !== null ||
+        document.querySelector("h3") !== null ||
+        document.querySelector(CONFIG.selectors.mobileSettingsButton) !== null
       );
     }
 
@@ -144,6 +190,129 @@
       }
       Logger.warn("Prompt input not found for focus restore");
       return false;
+    }
+
+    static async openMobileSettings() {
+      Logger.log("Attempting to open mobile settings panel...");
+      
+      const maxAttempts = 10;
+      const delayBetweenAttempts = 1000;
+      
+      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        Logger.log(`Open panel attempt ${attempt}/${maxAttempts}`);
+        
+        // Check if settings are already accessible
+        if (this.isSettingsPanelOpen()) {
+          Logger.log("Settings panel is already open and accessible!");
+          return true;
+        }
+        
+        // Try to find the button
+        let button = null;
+        
+        // Method 1: Try each selector from config
+        for (const selector of CONFIG.selectors.mobileSettingsButton) {
+          button = document.querySelector(selector);
+          if (button) {
+            Logger.log(`Button found with selector: ${selector}`);
+            break;
+          }
+        }
+        
+        // Method 2: Find by icon text "tune"
+        if (!button) {
+          const tuneIcons = Array.from(document.querySelectorAll('.material-symbols-outlined'));
+          for (const icon of tuneIcons) {
+            if (icon.textContent.trim() === 'tune') {
+              button = icon.closest('button');
+              if (button) {
+                Logger.log("Button found by 'tune' icon");
+                break;
+              }
+            }
+          }
+        }
+        
+        // Method 3: Find by class name
+        if (!button) {
+          button = document.querySelector('button.runsettings-toggle-button');
+          if (button) {
+            Logger.log("Button found by class 'runsettings-toggle-button'");
+          }
+        }
+        
+        if (!button) {
+          Logger.warn(`Attempt ${attempt}: Button not found, waiting...`);
+          await TimeUtils.sleep(delayBetweenAttempts);
+          continue;
+        }
+
+        // Click the button
+        Logger.log(`Attempt ${attempt}: Clicking settings button...`);
+        this.click(button);
+        
+        // Wait and check if settings became accessible
+        await TimeUtils.sleep(800);
+        
+        if (this.isSettingsPanelOpen()) {
+          Logger.log(`Success! Settings are accessible on attempt ${attempt}`);
+          return true;
+        }
+        
+        Logger.warn(`Attempt ${attempt}: Settings not accessible yet, retrying...`);
+        
+        if (attempt < maxAttempts) {
+          await TimeUtils.sleep(delayBetweenAttempts);
+        }
+      }
+      
+      Logger.error("Failed to open mobile settings panel after all attempts");
+      return false;
+    }
+
+    static async closeMobileSettings() {
+      Logger.log("Attempting to close mobile settings panel...");
+      
+      // Check if settings are still accessible (panel open)
+      if (!this.isSettingsPanelOpen()) {
+        Logger.log("Settings panel already closed");
+        return true;
+      }
+      
+      // Try to find the button
+      let button = null;
+      for (const selector of CONFIG.selectors.mobileSettingsButton) {
+        button = document.querySelector(selector);
+        if (button) break;
+      }
+      
+      if (!button) {
+        const tuneIcons = Array.from(document.querySelectorAll('.material-symbols-outlined'));
+        for (const icon of tuneIcons) {
+          if (icon.textContent.trim() === 'tune') {
+            button = icon.closest('button');
+            if (button) break;
+          }
+        }
+      }
+      
+      if (!button) {
+        Logger.log("Settings button not found for closing");
+        return false;
+      }
+
+      Logger.log("Closing settings panel...");
+      this.click(button);
+      await TimeUtils.sleep(400);
+      
+      // Verify it closed
+      if (!this.isSettingsPanelOpen()) {
+        Logger.log("Settings panel closed successfully");
+        return true;
+      } else {
+        Logger.warn("Settings panel may still be open");
+        return false;
+      }
     }
   }
 
@@ -351,6 +520,7 @@
         new TopPManager(),
         new MediaResolutionManager(),
       ];
+      this.isMobile = DeviceUtils.isMobile();
     }
     async waitForPageLoad() {
       const startTime = Date.now();
@@ -367,8 +537,21 @@
     }
     async applyAll() {
       await this.waitForPageLoad();
+
+      // Open mobile settings panel if needed
+      if (this.isMobile) {
+        Logger.log("Mobile device detected, opening settings panel...");
+        const opened = await DOMInteractor.openMobileSettings();
+        if (!opened) {
+          Logger.error("Failed to open mobile settings panel - aborting");
+          return false;
+        }
+        await TimeUtils.sleep(500); // Small delay after panel opens
+      }
+
       const { temperature, topP, mediaResolution } = CONFIG.settings;
       Logger.log("Starting settings application");
+      
       for (
         let attempt = 1;
         attempt <= CONFIG.execution.maxAttempts;
@@ -382,6 +565,13 @@
           await this.managers[2].apply(mediaResolution);
         if (this.isComplete()) {
           Logger.log("All settings applied successfully");
+          
+          // Close mobile settings panel after applying
+          if (this.isMobile) {
+            await TimeUtils.sleep(500);
+            await DOMInteractor.closeMobileSettings();
+          }
+          
           DOMInteractor.restorePromptFocus();
           return true;
         }
@@ -389,7 +579,14 @@
           await TimeUtils.sleep(CONFIG.execution.retryDelay);
         }
       }
+      
       Logger.warn("Failed to apply all settings after maximum attempts");
+      
+      // Close mobile settings panel even on failure
+      if (this.isMobile) {
+        await DOMInteractor.closeMobileSettings();
+      }
+      
       DOMInteractor.restorePromptFocus();
       return false;
     }
@@ -671,7 +868,9 @@
 
     async initialize() {
       try {
-        Logger.log("Initializing Auto Settings v7.1");
+        Logger.log("Initializing Auto Settings v7.5");
+        Logger.log(`Device type: ${DeviceUtils.isMobile() ? "Mobile" : "Desktop"}`);
+        Logger.log(`URL: ${window.location.href}`);
 
         await TimeUtils.sleep(1000);
 
