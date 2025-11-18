@@ -1,17 +1,19 @@
 # Google AI Studio - Auto Settings
 
-![Version](https://img.shields.io/badge/version-9.0-blue.svg)
+![Version](https://img.shields.io/badge/version-10.0-blue.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 
 A robust UserScript that automatically configures model parameters in **Google AI Studio**. It handles the repetitive task of setting Temperature, Top-P, and Media Resolution every time you open a chat or switch prompts.
 
 ## ✨ Key Features
 
+*   **🎨 Visual Settings Menu:** No more editing code! Configure your preferences (Temperature, Top-P, Resolution) through a modern, built-in UI.
+*   **💾 Persistent Storage:** Settings are saved via your UserScript manager, so they persist even if you update the script.
 *   **📱 Mobile & Desktop Support:** Works perfectly on desktop and automatically handles the side panel on mobile devices.
 *   **🖱️ Draggable UI:** A minimalist status indicator that you can drag and place anywhere on the screen. It remembers its position.
 *   **⚡ SPA Compatible:** Detects navigation between chats (Single Page Application) and reapplies settings instantly without reloading the page.
 *   **🛡️ Bulletproof Detection:** Uses text-based search (XPath) instead of fragile CSS selectors. It won't break when Google updates their class names.
-*   **⚙️ Fully Configurable:** Set your preferred defaults in the script code.
+*   **⌨️ Auto Focus:** Automatically returns focus to the prompt input area after applying settings, so you can start typing immediately.
 
 ## 🚀 Installation
 
@@ -25,26 +27,21 @@ A robust UserScript that automatically configures model parameters in **Google A
 
 ## 🔧 Configuration
 
-You can customize the default values by editing the `CONFIG` object at the top of the script.
+**New in v10.0:** You don't need to edit the code anymore!
 
-1.  Open your UserScript manager (e.g., Tampermonkey dashboard).
-2.  Edit the **Google AI Studio - Auto Settings** script.
-3.  Modify the values in the `settings` block:
+### Method 1: Right-Click the Icon
+1.  Locate the floating status icon (square) on your screen.
+2.  **Right-click** the icon to open the Settings Modal.
+3.  Adjust your values and click **Save & Apply**.
 
-```javascript
-const CONFIG = {
-    settings: {
-        temperature: 1.0,       // Range: 0.0 - 2.0
-        topP: 0.0,              // Range: 0.0 - 1.0 (Set 0 to remove limit)
-        mediaResolution: "Low", // Options: "Low", "Medium", "High"
-    },
-    execution: {
-        maxAttempts: 20,        // How many times to try applying settings
-        retryDelay: 500,        // Delay between attempts (ms)
-    },
-    // ...
-};
-```
+### Method 2: Tampermonkey Menu
+1.  Click the Tampermonkey extension icon in your browser toolbar.
+2.  Select **"⚙️ Configure Auto Settings"** from the menu.
+
+### Available Settings:
+*   **Temperature:** Range 0.0 - 2.0 (Controls randomness).
+*   **Top P:** Range 0.0 - 1.0 (Nucleus sampling).
+*   **Media Resolution:** Low, Medium, or High.
 
 ## 🖥️ Interface Guide
 
@@ -53,10 +50,13 @@ The script adds a small, non-intrusive status icon to your screen:
 | Icon | Color | Status | Action |
 | :---: | :--- | :--- | :--- |
 | **⏳** | **Blue** | **Applying...** | The script is currently searching for settings and applying values. |
-| **✓** | **Green** | **Success** | All settings (Temp, Top-P, Resolution) have been applied successfully. |
-| **!** | **Red** | **Timeout** | Could not find some settings (e.g., panel was closed). **Click the icon to retry.** |
+| **✓** | **Green** | **Success** | All settings have been applied successfully. |
+| **!** | **Red** | **Timeout** | Could not find some settings. **Left-click to retry.** |
 
-> **Note:** You can drag this icon to any corner of the screen. The script will save the position for your next visit.
+**Interactions:**
+*   **Left Click:** Retry applying settings.
+*   **Right Click:** Open Configuration Menu.
+*   **Drag:** Move the icon to any position on the screen.
 
 ## 📱 Mobile Behavior
 
@@ -72,4 +72,3 @@ Feel free to open an issue or submit a pull request if Google updates the UI and
 
 ---
 *This script is not affiliated with Google.*
-```
