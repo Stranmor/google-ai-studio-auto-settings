@@ -20,7 +20,7 @@ A robust UserScript that automatically configures model parameters in **Google A
     *   Violentmonkey
 
 2.  **Install the Script:**
-    *   **[Click here to install from Greasy Fork](https://greasyfork.org/scripts/486538-google-ai-studio-auto-settings)** *(Example link - replace with your actual URL)*
+    *   **[Click here to install from Greasy Fork](https://greasyfork.org/en/scripts/554936-google-ai-studio-auto-settings)** 
     *   Or create a new script in Tampermonkey and paste the code manually.
 
 ## 🔧 Configuration
