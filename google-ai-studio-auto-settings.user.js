@@ -1,899 +1,396 @@
 // ==UserScript==
-// @name         Google AI Studio - Auto Settings
-// @namespace    https://github.com/ai-studio-tools
-// @version      7.5
-// @description  Automatically configures model parameters (Temperature, Top-P, Media Resolution) in Google AI Studio with a clean, modern interface. Now supports mobile and all pages!
-// @author       AI Studio Tools
+// @name         Google AI Studio - Auto Settings (Ultimate)
+// @namespace    https://github.com/Stranmor/google-ai-studio-auto-settings
+// @version      9.0
+// @description  Best of both worlds: Reliable text-based search + Draggable UI + Mobile support.
+// @author       Stranmor
 // @match        https://aistudio.google.com/*
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=aistudio.google.com
 // @grant        none
 // @run-at       document-end
 // @license      MIT
-// @homepageURL  https://github.com/Stranmor/google-ai-studio-auto-settings
-// @supportURL   https://github.com/Stranmor/google-ai-studio-auto-settings/issues
 // ==/UserScript==
 
 (function () {
   "use strict";
 
-  // ==================== CONFIGURATION ====================
+  // ==================== КОНФИГУРАЦИЯ ====================
   const CONFIG = {
     settings: {
-      temperature: 0.7,
+      temperature: 1.0,
       topP: 0.0,
-      mediaResolution: "Low",
+      mediaResolution: "Low", // "Low", "Medium", "High"
     },
     execution: {
-      debug: true,
-      maxAttempts: 30,
-      retryDelay: 2000,
-      pageLoadTimeout: 60000,
+      maxAttempts: 20,    // Сколько раз пытаться применить (раз в 500мс)
+      retryDelay: 500,    // Пауза между попытками
     },
-    selectors: {
-      temperature: {
-        container: '[data-test-id="temperatureSliderContainer"]',
-        title: "Temperature",
-      },
-      topP: {
-        titles: ["Top P", "Top-P"],
-      },
-      mediaResolution: {
-        container: '[data-test-id="mediaResolution"]',
-        title: "Media resolution",
-      },
-      promptInput: "ms-autosize-textarea textarea.textarea",
-      mobileSettingsButton: [
-        'button[aria-label="Toggle run settings panel"]',
-        'button.runsettings-toggle-button',
-        'button[iconname="tune"]',
-        'button:has(.material-symbols-outlined:contains("tune"))',
-      ],
-      settingsPanel: '.runsettings-panel, [class*="runsettings-panel"]',
-    },
-    storage: {
-      positionKey: "as-panel-position",
-    },
+    storageKey: "as-panel-pos-v9"
   };
 
-  // ==================== UTILITIES ====================
-  const Logger = {
-    log: (message, ...args) =>
-      CONFIG.execution.debug && console.log(`[AS] ${message}`, ...args),
-    warn: (message, ...args) =>
-      CONFIG.execution.debug && console.warn(`[AS] ${message}`, ...args),
-    error: (message, ...args) =>
-      CONFIG.execution.debug && console.error(`[AS] ${message}`, ...args),
-  };
+  // ==================== ИНСТРУМЕНТЫ (UTILS) ====================
+  const Utils = {
+    sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
 
-  const TimeUtils = {
-    sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
-  };
+    isMobile: () => window.innerWidth < 768,
 
-  const StorageUtils = {
-    savePosition: (x, y) => {
-      try {
-        localStorage.setItem(
-          CONFIG.storage.positionKey,
-          JSON.stringify({ x, y }),
-        );
-        Logger.log(`Position saved: x=${x}, y=${y}`);
-      } catch (e) {
-        Logger.error("Failed to save position:", e);
-      }
+    // Надежный поиск элемента по тексту (XPath)
+    findByText: (text, tag = "*") => {
+      const xpath = `//${tag}[contains(text(), '${text}')]`;
+      const result = document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);
+      return result.singleNodeValue;
     },
-    loadPosition: () => {
-      try {
-        const saved = localStorage.getItem(CONFIG.storage.positionKey);
-        if (saved) {
-          const pos = JSON.parse(saved);
-          Logger.log(`Position loaded: x=${pos.x}, y=${pos.y}`);
-          return pos;
-        }
-      } catch (e) {
-        Logger.error("Failed to load position:", e);
-      }
-      return { x: 20, y: 20 }; // default bottom-left
-    },
-  };
 
-  const DeviceUtils = {
-    isMobile: () => {
-      return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
-        navigator.userAgent
-      ) || window.innerWidth < 768;
-    },
-  };
+    // Поиск инпута рядом с текстовой меткой (обходит Shadow DOM и вложенность)
+    findInputNearLabel: (labelText) => {
+      const label = Utils.findByText(labelText);
+      if (!label) return null;
 
-  // ==================== DOM INTERACTION ====================
-  class DOMInteractor {
-    static findElementByText(selector, text) {
-      const elements = document.querySelectorAll(selector);
-      for (const el of elements) {
-        if (el.textContent.trim() === text) {
-          return el.closest(".settings-item-column, .settings-item");
-        }
+      // Ищем вверх на 6 уровней, проверяя наличие input внутри
+      let parent = label.parentElement;
+      for (let i = 0; i < 6; i++) {
+        if (!parent) break;
+        const input = parent.querySelector('input[type="number"]');
+        if (input) return input;
+        parent = parent.parentElement;
       }
       return null;
-    }
+    },
 
-    static click(element) {
-      if (!element) return false;
-      
+    // Эмуляция ввода пользователя (Focus -> Value -> Event -> Blur)
+    setValue: (input, value) => {
+      if (!input) return false;
+      if (Math.abs(parseFloat(input.value) - value) < 0.01) return true; // Уже стоит
+
       try {
-        // Simple direct click - most reliable method
-        element.click();
-        Logger.log("Click executed");
+        input.focus();
+        const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+        nativeInputValueSetter.call(input, value);
+
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+        input.blur();
         return true;
       } catch (e) {
-        Logger.error("Click failed:", e);
+        console.error("Set value error:", e);
         return false;
       }
     }
+  };
 
-    static setValue(element, value) {
-      if (!element) return false;
-      element.focus();
-      const descriptor = Object.getOwnPropertyDescriptor(
-        HTMLInputElement.prototype,
-        "value",
-      );
-      descriptor?.set?.call(element, value);
-      ["input", "change"].forEach((eventType) =>
-        element.dispatchEvent(new Event(eventType, { bubbles: true })),
-      );
-      element.blur();
-      return true;
-    }
+  // ==================== ЛОГИКА МОБИЛЬНОЙ ВЕРСИИ ====================
+  const MobileHandler = {
+    // Проверяет, открыта ли панель (виден ли инпут температуры)
+    isPanelOpen: () => {
+      const input = document.querySelector('input[type="number"]');
+      return input && input.offsetParent !== null;
+    },
 
-    static isSettingsPanelOpen() {
-      // Check if temperature control is available - most reliable indicator
-      const tempContainer = document.querySelector(
-        CONFIG.selectors.temperature.container
-      ) || DOMInteractor.findElementByText("h3", CONFIG.selectors.temperature.title);
-      
-      if (tempContainer) {
-        const tempInput = tempContainer.querySelector('input[type="number"]');
-        if (tempInput && tempInput.offsetParent !== null) {
-          return true;
-        }
+    // Ищет кнопку настроек (обычно иконка 'tune')
+    findToggleButton: () => {
+      // 1. Ищем по иконке Material Symbols
+      const icons = Array.from(document.querySelectorAll('.material-symbols-outlined, .material-icons'));
+      const tuneIcon = icons.find(icon => icon.textContent.trim() === 'tune');
+      if (tuneIcon) return tuneIcon.closest('button');
+
+      // 2. Ищем по классу (резерв)
+      return document.querySelector('button.runsettings-toggle-button');
+    },
+
+    async toggle(shouldOpen) {
+      if (this.isPanelOpen() === shouldOpen) return true;
+
+      const btn = this.findToggleButton();
+      if (!btn) return false;
+
+      btn.click();
+      // Ждем анимацию
+      for (let i = 0; i < 5; i++) {
+        await Utils.sleep(200);
+        if (this.isPanelOpen() === shouldOpen) return true;
       }
-      
-      // Fallback: check for any h3 settings headers
-      const settingsHeaders = document.querySelectorAll('h3');
-      for (const header of settingsHeaders) {
-        const text = header.textContent.trim();
-        if ((text === 'Temperature' || text === 'Top P' || text === 'Top-P') && 
-            header.offsetParent !== null) {
-          return true;
-        }
-      }
-      
       return false;
     }
+  };
 
-    static isPageLoaded() {
-      return (
-        document.querySelector(CONFIG.selectors.promptInput) !== null ||
-        document.querySelector("h3") !== null ||
-        document.querySelector(CONFIG.selectors.mobileSettingsButton) !== null
-      );
+  // ==================== ЛОГИКА ПРИМЕНЕНИЯ НАСТРОЕК ====================
+  class SettingsApplier {
+    constructor() {
+      this.status = { temp: false, topP: false, res: false };
     }
 
-    static restorePromptFocus() {
-      const promptInput = document.querySelector(CONFIG.selectors.promptInput);
-      if (promptInput) {
-        setTimeout(() => {
-          promptInput.focus();
-          Logger.log("Focus restored to prompt input");
-        }, 100);
-        return true;
-      }
-      Logger.warn("Prompt input not found for focus restore");
-      return false;
-    }
-
-    static async openMobileSettings() {
-      Logger.log("Attempting to open mobile settings panel...");
-      
-      const maxAttempts = 10;
-      const delayBetweenAttempts = 1000;
-      
-      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-        Logger.log(`Open panel attempt ${attempt}/${maxAttempts}`);
-        
-        // Check if settings are already accessible
-        if (this.isSettingsPanelOpen()) {
-          Logger.log("Settings panel is already open and accessible!");
-          return true;
-        }
-        
-        // Try to find the button
-        let button = null;
-        
-        // Method 1: Try each selector from config
-        for (const selector of CONFIG.selectors.mobileSettingsButton) {
-          button = document.querySelector(selector);
-          if (button) {
-            Logger.log(`Button found with selector: ${selector}`);
-            break;
-          }
-        }
-        
-        // Method 2: Find by icon text "tune"
-        if (!button) {
-          const tuneIcons = Array.from(document.querySelectorAll('.material-symbols-outlined'));
-          for (const icon of tuneIcons) {
-            if (icon.textContent.trim() === 'tune') {
-              button = icon.closest('button');
-              if (button) {
-                Logger.log("Button found by 'tune' icon");
-                break;
-              }
-            }
-          }
-        }
-        
-        // Method 3: Find by class name
-        if (!button) {
-          button = document.querySelector('button.runsettings-toggle-button');
-          if (button) {
-            Logger.log("Button found by class 'runsettings-toggle-button'");
-          }
-        }
-        
-        if (!button) {
-          Logger.warn(`Attempt ${attempt}: Button not found, waiting...`);
-          await TimeUtils.sleep(delayBetweenAttempts);
-          continue;
-        }
-
-        // Click the button
-        Logger.log(`Attempt ${attempt}: Clicking settings button...`);
-        this.click(button);
-        
-        // Wait and check if settings became accessible
-        await TimeUtils.sleep(800);
-        
-        if (this.isSettingsPanelOpen()) {
-          Logger.log(`Success! Settings are accessible on attempt ${attempt}`);
-          return true;
-        }
-        
-        Logger.warn(`Attempt ${attempt}: Settings not accessible yet, retrying...`);
-        
-        if (attempt < maxAttempts) {
-          await TimeUtils.sleep(delayBetweenAttempts);
-        }
-      }
-      
-      Logger.error("Failed to open mobile settings panel after all attempts");
-      return false;
-    }
-
-    static async closeMobileSettings() {
-      Logger.log("Attempting to close mobile settings panel...");
-      
-      // Check if settings are still accessible (panel open)
-      if (!this.isSettingsPanelOpen()) {
-        Logger.log("Settings panel already closed");
-        return true;
-      }
-      
-      // Try to find the button
-      let button = null;
-      for (const selector of CONFIG.selectors.mobileSettingsButton) {
-        button = document.querySelector(selector);
-        if (button) break;
-      }
-      
-      if (!button) {
-        const tuneIcons = Array.from(document.querySelectorAll('.material-symbols-outlined'));
-        for (const icon of tuneIcons) {
-          if (icon.textContent.trim() === 'tune') {
-            button = icon.closest('button');
-            if (button) break;
-          }
-        }
-      }
-      
-      if (!button) {
-        Logger.log("Settings button not found for closing");
-        return false;
-      }
-
-      Logger.log("Closing settings panel...");
-      this.click(button);
-      await TimeUtils.sleep(400);
-      
-      // Verify it closed
-      if (!this.isSettingsPanelOpen()) {
-        Logger.log("Settings panel closed successfully");
-        return true;
-      } else {
-        Logger.warn("Settings panel may still be open");
-        return false;
-      }
-    }
-  }
-
-  // ==================== SETTINGS MANAGERS ====================
-  class BaseSettingManager {
-    constructor(name) {
-      this.name = name;
-      this.isApplied = false;
-    }
-    async check() {
-      throw new Error("Method check() must be implemented");
-    }
-    async apply() {
-      throw new Error("Method apply() must be implemented");
-    }
     reset() {
-      this.isApplied = false;
+      this.status = { temp: false, topP: false, res: false };
     }
-    log(message, level = "log") {
-      Logger[level](`[${this.name}] ${message}`);
-    }
-  }
 
-  class TemperatureManager extends BaseSettingManager {
-    constructor() {
-      super("Temperature");
-    }
-    async check(targetValue) {
-      const container = this._findContainer();
-      if (!container) return false;
-      const input = container.querySelector('input[type="number"]');
-      if (!input) return false;
-      const isMatch = Math.abs(parseFloat(input.value) - targetValue) < 0.001;
-      if (isMatch) {
-        this.isApplied = true;
-        this.log(`Already set to ${targetValue}`);
-      }
-      return isMatch;
-    }
-    async apply(value) {
-      if (this.isApplied) return true;
-      const container = this._findContainer();
-      if (!container) {
-        this.log("Container not found", "warn");
-        return false;
-      }
-      const numInput = container.querySelector('input[type="number"]');
-      const rangeInput = container.querySelector('input[type="range"]');
-      if (!numInput || !rangeInput) {
-        this.log("Input elements not found", "warn");
-        return false;
-      }
-      DOMInteractor.click(numInput);
-      DOMInteractor.setValue(numInput, value);
-      DOMInteractor.setValue(rangeInput, value);
-      this.isApplied = await this.check(value);
-      this.log(
-        this.isApplied
-          ? `Successfully set to ${value}`
-          : `Failed to set to ${value}`,
-        this.isApplied ? "log" : "error",
-      );
-      return this.isApplied;
-    }
-    _findContainer() {
-      return (
-        DOMInteractor.findElementByText(
-          "h3",
-          CONFIG.selectors.temperature.title,
-        ) || document.querySelector(CONFIG.selectors.temperature.container)
-      );
-    }
-  }
+    async applyResolution(targetRes) {
+      if (this.status.res) return true;
 
-  class TopPManager extends BaseSettingManager {
-    constructor() {
-      super("TopP");
-    }
-    async check(targetValue) {
-      const container = this._findContainer();
-      if (!container) return false;
-      const input = container.querySelector('input[type="number"]');
-      if (!input) return false;
-      const isMatch = Math.abs(parseFloat(input.value) - targetValue) < 0.001;
-      if (isMatch) {
-        this.isApplied = true;
-        this.log(`Already set to ${targetValue}`);
-      }
-      return isMatch;
-    }
-    async apply(value) {
-      if (this.isApplied) return true;
-      const container = this._findContainer();
-      if (!container) {
-        this.log("Container not found", "warn");
-        return false;
-      }
-      const numInput = container.querySelector('input[type="number"]');
-      const rangeInput = container.querySelector('input[type="range"]');
-      if (!numInput || !rangeInput) {
-        this.log("Input elements not found", "warn");
-        return false;
-      }
-      if (value === 0) {
-        this._removeMinConstraint(rangeInput);
-        this._removeMinConstraint(numInput);
-      }
-      DOMInteractor.click(numInput);
-      DOMInteractor.setValue(numInput, value);
-      DOMInteractor.setValue(rangeInput, value);
-      this.isApplied = await this.check(value);
-      this.log(
-        this.isApplied
-          ? `Successfully set to ${value}`
-          : `Failed to set to ${value}`,
-        this.isApplied ? "log" : "error",
-      );
-      return this.isApplied;
-    }
-    _findContainer() {
-      for (const title of CONFIG.selectors.topP.titles) {
-        const container = DOMInteractor.findElementByText("h3", title);
-        if (container) return container;
-      }
-      return null;
-    }
-    _removeMinConstraint(input) {
-      if (input) {
-        input.removeAttribute("min");
-        input.min = "0";
-      }
-    }
-  }
+      const label = Utils.findByText("Media resolution");
+      if (!label) return false;
 
-  class MediaResolutionManager extends BaseSettingManager {
-    constructor() {
-      super("MediaResolution");
-    }
-    async check(targetValue) {
-      const container = this._findContainer();
-      if (!container) return false;
-      const select = container.querySelector("mat-select");
+      // Ищем селект рядом с меткой
+      let parent = label.parentElement;
+      let select = null;
+      for (let i = 0; i < 6; i++) {
+        if (!parent) break;
+        select = parent.querySelector('mat-select');
+        if (select) break;
+        parent = parent.parentElement;
+      }
+
       if (!select) return false;
-      const currentValue = select
-        .querySelector(".mat-mdc-select-value-text span")
-        ?.textContent?.trim();
-      const isMatch = currentValue === targetValue;
-      if (isMatch) {
-        this.isApplied = true;
-        this.log(`Already set to ${targetValue}`);
-      }
-      return isMatch;
-    }
-    async apply(value) {
-      if (this.isApplied) return true;
-      const container = this._findContainer();
-      if (!container) {
-        this.log("Container not found", "warn");
-        return false;
-      }
-      const select = container.querySelector("mat-select");
-      if (!select) {
-        this.log("Select element not found", "warn");
-        return false;
-      }
-      DOMInteractor.click(select);
-      await TimeUtils.sleep(100);
-      const option = Array.from(document.querySelectorAll("mat-option")).find(
-        (opt) =>
-          opt
-            .querySelector(".mdc-list-item__primary-text")
-            ?.textContent?.trim() === value,
-      );
-      if (!option) {
-        this.log(`Option "${value}" not found`, "error");
-        DOMInteractor.click(document.body);
-        return false;
-      }
-      DOMInteractor.click(option);
-      await TimeUtils.sleep(100);
-      this.isApplied = await this.check(value);
-      this.log(
-        this.isApplied
-          ? `Successfully set to ${value}`
-          : `Failed to set to ${value}`,
-        this.isApplied ? "log" : "error",
-      );
-      return this.isApplied;
-    }
-    _findContainer() {
-      return (
-        DOMInteractor.findElementByText(
-          "h3",
-          CONFIG.selectors.mediaResolution.title,
-        ) || document.querySelector(CONFIG.selectors.mediaResolution.container)
-      );
-    }
-  }
 
-  // ==================== ORCHESTRATOR ====================
-  class SettingsOrchestrator {
-    constructor() {
-      this.managers = [
-        new TemperatureManager(),
-        new TopPManager(),
-        new MediaResolutionManager(),
-      ];
-      this.isMobile = DeviceUtils.isMobile();
-    }
-    async waitForPageLoad() {
-      const startTime = Date.now();
-      Logger.log("Waiting for page to load...");
-      while (Date.now() - startTime < CONFIG.execution.pageLoadTimeout) {
-        if (DOMInteractor.isPageLoaded()) {
-          Logger.log("Page loaded successfully");
-          return true;
+      // Проверка текущего значения
+      const currentVal = select.querySelector('.mat-mdc-select-value-text span')?.textContent?.trim();
+      if (currentVal === targetRes) {
+        this.status.res = true;
+        return true;
+      }
+
+      // Клик и выбор
+      select.click();
+      await Utils.sleep(150);
+
+      const options = document.querySelectorAll('mat-option');
+      let clicked = false;
+      for (const opt of options) {
+        if (opt.textContent.includes(targetRes)) {
+          opt.click();
+          clicked = true;
+          break;
         }
-        await TimeUtils.sleep(500);
       }
-      Logger.warn("Page load timeout, but continuing anyway...");
-      return false;
+
+      if (!clicked) document.body.click(); // Закрыть если не нашли
+      else this.status.res = true;
+
+      return this.status.res;
     }
-    async applyAll() {
-      await this.waitForPageLoad();
 
-      // Open mobile settings panel if needed
-      if (this.isMobile) {
-        Logger.log("Mobile device detected, opening settings panel...");
-        const opened = await DOMInteractor.openMobileSettings();
-        if (!opened) {
-          Logger.error("Failed to open mobile settings panel - aborting");
-          return false;
-        }
-        await TimeUtils.sleep(500); // Small delay after panel opens
+    async run() {
+      // 1. Мобильная версия: Открыть панель
+      if (Utils.isMobile()) {
+        await MobileHandler.toggle(true);
+        await Utils.sleep(300);
       }
 
-      const { temperature, topP, mediaResolution } = CONFIG.settings;
-      Logger.log("Starting settings application");
-      
-      for (
-        let attempt = 1;
-        attempt <= CONFIG.execution.maxAttempts;
-        attempt++
-      ) {
-        Logger.log(`Attempt ${attempt}/${CONFIG.execution.maxAttempts}`);
-        if (!this.managers[0].isApplied)
-          await this.managers[0].apply(temperature);
-        if (!this.managers[1].isApplied) await this.managers[1].apply(topP);
-        if (!this.managers[2].isApplied)
-          await this.managers[2].apply(mediaResolution);
-        if (this.isComplete()) {
-          Logger.log("All settings applied successfully");
-          
-          // Close mobile settings panel after applying
-          if (this.isMobile) {
-            await TimeUtils.sleep(500);
-            await DOMInteractor.closeMobileSettings();
+      // 2. Применение Temperature
+      if (!this.status.temp) {
+        const input = Utils.findInputNearLabel("Temperature");
+        if (input && Utils.setValue(input, CONFIG.settings.temperature)) {
+          this.status.temp = true;
+        }
+      }
+
+      // 3. Применение Top P
+      if (!this.status.topP) {
+        const input = Utils.findInputNearLabel("Top P") || Utils.findInputNearLabel("Top-P");
+        if (input) {
+          if (CONFIG.settings.topP === 0) input.removeAttribute('min');
+          if (Utils.setValue(input, CONFIG.settings.topP)) {
+            this.status.topP = true;
           }
-          
-          DOMInteractor.restorePromptFocus();
-          return true;
-        }
-        if (attempt < CONFIG.execution.maxAttempts) {
-          await TimeUtils.sleep(CONFIG.execution.retryDelay);
         }
       }
-      
-      Logger.warn("Failed to apply all settings after maximum attempts");
-      
-      // Close mobile settings panel even on failure
-      if (this.isMobile) {
-        await DOMInteractor.closeMobileSettings();
+
+      // 4. Применение Resolution
+      await this.applyResolution(CONFIG.settings.mediaResolution);
+
+      const allDone = this.status.temp && this.status.topP && this.status.res;
+
+      // 5. Мобильная версия: Закрыть панель если всё готово
+      if (Utils.isMobile() && allDone) {
+        await Utils.sleep(200);
+        await MobileHandler.toggle(false);
       }
-      
-      DOMInteractor.restorePromptFocus();
-      return false;
-    }
-    isComplete() {
-      return this.managers.every((m) => m.isApplied);
-    }
-    reset() {
-      this.managers.forEach((m) => m.reset());
-    }
-    getStatus() {
-      return {
-        total: this.managers.length,
-        applied: this.managers.filter((m) => m.isApplied).length,
-        pending: this.managers.filter((m) => !m.isApplied).map((m) => m.name),
-      };
+
+      return allDone;
     }
   }
 
-  // ==================== UI COMPONENT ====================
-  class UIComponent {
-    constructor(orchestrator) {
-      this.orchestrator = orchestrator;
+  // ==================== UI (DRAGGABLE PANEL) ====================
+  class UI {
+    constructor(onRetry) {
       this.panel = null;
-      this.isDragging = false;
-      this.dragStartX = 0;
-      this.dragStartY = 0;
-      this.panelStartX = 0;
-      this.panelStartY = 0;
+      this.onRetry = onRetry;
+      this.render();
     }
 
     render() {
-      this._injectStyles();
+      // Удаляем старую панель если есть
+      const old = document.getElementById('as-panel-v9');
+      if (old) old.remove();
 
-      const panel = document.createElement("div");
-      panel.id = "as-panel";
-      panel.className = "as-panel--loading";
+      this.panel = document.createElement('div');
+      this.panel.id = 'as-panel-v9';
 
-      const savedPos = StorageUtils.loadPosition();
-      panel.style.left = `${savedPos.x}px`;
-      panel.style.bottom = `${savedPos.y}px`;
+      // Стили
+      Object.assign(this.panel.style, {
+        position: 'fixed',
+        zIndex: '999999',
+        width: '32px',
+        height: '32px',
+        background: '#ffffff',
+        borderRadius: '8px',
+        boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        cursor: 'pointer',
+        userSelect: 'none',
+        border: '1px solid #e5e7eb',
+        fontSize: '18px',
+        transition: 'transform 0.1s'
+      });
 
-      panel.innerHTML = `
-                <div id="as-status">⏳</div>
-                <div id="as-tooltip">Loading...</div>
-            `;
-
-      document.body.appendChild(panel);
-      this.panel = panel;
-
-      this._attachDragListeners();
-      Logger.log("UI rendered successfully");
-    }
-
-    _attachDragListeners() {
-      const status = this.panel.querySelector("#as-status");
-
-      status.addEventListener("mousedown", (e) => this._onDragStart(e));
-      document.addEventListener("mousemove", (e) => this._onDragMove(e));
-      document.addEventListener("mouseup", (e) => this._onDragEnd(e));
-
-      // Touch support
-      status.addEventListener("touchstart", (e) => this._onDragStart(e));
-      document.addEventListener("touchmove", (e) => this._onDragMove(e));
-      document.addEventListener("touchend", (e) => this._onDragEnd(e));
-    }
-
-    _onDragStart(e) {
-      e.preventDefault();
-      this.isDragging = true;
-
-      const clientX = e.clientX || e.touches?.[0]?.clientX || 0;
-      const clientY = e.clientY || e.touches?.[0]?.clientY || 0;
-
-      this.dragStartX = clientX;
-      this.dragStartY = clientY;
-
-      const rect = this.panel.getBoundingClientRect();
-      this.panelStartX = rect.left;
-      this.panelStartY = window.innerHeight - rect.bottom;
-
-      this.panel.style.transition = "none";
-      this.panel.style.cursor = "grabbing";
-
-      Logger.log("Drag started");
-    }
-
-    _onDragMove(e) {
-      if (!this.isDragging) return;
-
-      const clientX = e.clientX || e.touches?.[0]?.clientX || 0;
-      const clientY = e.clientY || e.touches?.[0]?.clientY || 0;
-
-      const deltaX = clientX - this.dragStartX;
-      const deltaY = -(clientY - this.dragStartY);
-
-      let newX = this.panelStartX + deltaX;
-      let newY = this.panelStartY + deltaY;
-
-      // Boundaries
-      const maxX = window.innerWidth - this.panel.offsetWidth;
-      const maxY = window.innerHeight - this.panel.offsetHeight;
-
-      newX = Math.max(0, Math.min(newX, maxX));
-      newY = Math.max(0, Math.min(newY, maxY));
-
-      this.panel.style.left = `${newX}px`;
-      this.panel.style.bottom = `${newY}px`;
-    }
-
-    _onDragEnd(e) {
-      if (!this.isDragging) return;
-
-      this.isDragging = false;
-      this.panel.style.transition = "";
-      this.panel.style.cursor = "pointer";
-
-      const rect = this.panel.getBoundingClientRect();
-      const finalX = rect.left;
-      const finalY = window.innerHeight - rect.bottom;
-
-      StorageUtils.savePosition(finalX, finalY);
-
-      Logger.log("Drag ended");
-
-      // Check if it was just a click (minimal movement)
-      const clientX = e.clientX || e.changedTouches?.[0]?.clientX || 0;
-      const clientY = e.clientY || e.changedTouches?.[0]?.clientY || 0;
-
-      const moveDistance = Math.sqrt(
-        Math.pow(clientX - this.dragStartX, 2) +
-          Math.pow(clientY - this.dragStartY, 2),
-      );
-
-      if (moveDistance < 5) {
-        this._handleClick();
+      // Загрузка позиции
+      const savedPos = localStorage.getItem(CONFIG.storageKey);
+      if (savedPos) {
+        const { left, bottom } = JSON.parse(savedPos);
+        this.panel.style.left = left;
+        this.panel.style.bottom = bottom;
+      } else {
+        this.panel.style.left = '20px';
+        this.panel.style.bottom = '20px';
       }
-    }
 
-    async _handleClick() {
-      Logger.log("Panel clicked - reapplying settings");
-      this.orchestrator.reset();
-      await this.runApplication();
-    }
+      this.updateStatus('loading');
+      document.body.appendChild(this.panel);
 
-    _injectStyles() {
-      const style = document.createElement("style");
-      style.id = "as-styles";
-      style.textContent = `
-                #as-panel {
-                    position: fixed !important;
-                    width: 28px !important;
-                    height: 28px !important;
-                    background: #ffffff !important;
-                    border: 1px solid #d1d5db !important;
-                    border-radius: 6px !important;
-                    box-shadow: 0 1px 3px rgba(0,0,0,0.1) !important;
-                    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif !important;
-                    z-index: 999999 !important;
-                    cursor: pointer !important;
-                    display: flex !important;
-                    align-items: center !important;
-                    justify-content: center !important;
-                    transition: none !important;
-                    user-select: none !important;
-                    opacity: 0.85 !important;
-                }
-                #as-panel:hover {
-                    opacity: 1 !important;
-                    border-color: #9ca3af !important;
-                }
-                #as-panel.as-panel--success {
-                    background-color: #ecfdf5 !important;
-                    border-color: #10b981 !important;
-                }
-                #as-panel.as-panel--success #as-status {
-                    color: #10b981 !important;
-                }
-                #as-panel.as-panel--error {
-                    background-color: #fef2f2 !important;
-                    border-color: #ef4444 !important;
-                }
-                #as-panel.as-panel--error #as-status {
-                    color: #ef4444 !important;
-                }
-                #as-panel.as-panel--loading {
-                    background-color: #eff6ff !important;
-                    border-color: #3b82f6 !important;
-                }
-                #as-panel.as-panel--loading #as-status {
-                    color: #3b82f6 !important;
-                }
-                #as-panel:hover #as-tooltip {
-                    opacity: 1 !important;
-                    visibility: visible !important;
-                    transform: translateY(-50%) scale(1) !important;
-                }
-                #as-status {
-                    font-size: 22px !important;
-                    line-height: 1 !important;
-                    transition: color 0.3s !important;
-                    cursor: grab !important;
-                    pointer-events: all !important;
-                }
-                #as-status:active {
-                    cursor: grabbing !important;
-                }
-                #as-tooltip {
-                    position: absolute !important;
-                    left: 58px !important;
-                    top: 50% !important;
-                    transform: translateY(-50%) scale(0.95) !important;
-                    background: #1f2937 !important;
-                    color: #fff !important;
-                    padding: 8px 14px !important;
-                    border-radius: 8px !important;
-                    font-size: 13px !important;
-                    font-weight: 500 !important;
-                    white-space: nowrap !important;
-                    opacity: 0 !important;
-                    visibility: hidden !important;
-                    transition: all 0.2s ease-out !important;
-                    pointer-events: none !important;
-                    box-shadow: 0 4px 12px rgba(0,0,0,0.3) !important;
-                }
-                #as-tooltip::before {
-                    content: '' !important;
-                    position: absolute !important;
-                    right: 100% !important;
-                    top: 50% !important;
-                    transform: translateY(-50%) !important;
-                    border: 6px solid transparent !important;
-                    border-right-color: #1f2937 !important;
-                }
-            `;
-      document.head.appendChild(style);
-      Logger.log("Styles injected");
-    }
-
-    async runApplication() {
-      this.updateStatus("loading");
-      const success = await this.orchestrator.applyAll();
-      this.updateStatus(success ? "success" : "error");
+      // События
+      this.makeDraggable();
+      this.panel.addEventListener('click', (e) => {
+        if (!this.isDragging) this.onRetry();
+      });
     }
 
     updateStatus(state) {
       if (!this.panel) return;
 
-      const statusEl = this.panel.querySelector("#as-status");
-      const tooltipEl = this.panel.querySelector("#as-tooltip");
-      const status = this.orchestrator.getStatus();
-
-      this.panel.className = `as-panel--${state}`;
-
-      switch (state) {
-        case "loading":
-          statusEl.textContent = "⏳";
-          tooltipEl.textContent = `Applying... (${status.applied}/${status.total})`;
-          break;
-        case "success":
-          statusEl.textContent = "✓";
-          tooltipEl.textContent = "All settings applied!";
-          break;
-        case "error":
-          statusEl.textContent = "✗";
-          tooltipEl.textContent = `Failed! Pending: ${status.pending.join(", ")}`;
-          break;
+      if (state === 'loading') {
+        this.panel.innerHTML = '⏳';
+        this.panel.style.borderColor = '#3b82f6';
+      } else if (state === 'success') {
+        this.panel.innerHTML = '<span style="color:#10b981">✓</span>';
+        this.panel.style.borderColor = '#10b981';
+      } else {
+        this.panel.innerHTML = '<span style="color:#ef4444">!</span>';
+        this.panel.style.borderColor = '#ef4444';
       }
+    }
 
-      Logger.log(`Status updated: ${state}`);
+    makeDraggable() {
+      let startX, startY, startLeft, startBottom;
+
+      const onDown = (e) => {
+        // Игнорируем клик правой кнопкой
+        if (e.button === 2) return;
+
+        this.isDragging = false;
+        const clientX = e.clientX || e.touches?.[0]?.clientX;
+        const clientY = e.clientY || e.touches?.[0]?.clientY;
+
+        startX = clientX;
+        startY = clientY;
+
+        const rect = this.panel.getBoundingClientRect();
+        startLeft = rect.left;
+        startBottom = window.innerHeight - rect.bottom;
+
+        document.addEventListener('mousemove', onMove);
+        document.addEventListener('touchmove', onMove, { passive: false });
+        document.addEventListener('mouseup', onUp);
+        document.addEventListener('touchend', onUp);
+      };
+
+      const onMove = (e) => {
+        const clientX = e.clientX || e.touches?.[0]?.clientX;
+        const clientY = e.clientY || e.touches?.[0]?.clientY;
+
+        // Если сдвинули больше чем на 3 пикселя, считаем это перетаскиванием
+        if (Math.abs(clientX - startX) > 3 || Math.abs(clientY - startY) > 3) {
+          this.isDragging = true;
+          if (e.preventDefault) e.preventDefault(); // Блокируем скролл на мобильных
+        }
+
+        const dx = clientX - startX;
+        const dy = clientY - startY;
+
+        this.panel.style.left = `${startLeft + dx}px`;
+        this.panel.style.bottom = `${startBottom - dy}px`;
+      };
+
+      const onUp = () => {
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('touchmove', onMove);
+        document.removeEventListener('mouseup', onUp);
+        document.removeEventListener('touchend', onUp);
+
+        // Сохраняем позицию
+        localStorage.setItem(CONFIG.storageKey, JSON.stringify({
+          left: this.panel.style.left,
+          bottom: this.panel.style.bottom
+        }));
+      };
+
+      this.panel.addEventListener('mousedown', onDown);
+      this.panel.addEventListener('touchstart', onDown, { passive: false });
     }
   }
 
-  // ==================== APPLICATION ====================
-  class Application {
+  // ==================== ГЛАВНЫЙ КОНТРОЛЛЕР ====================
+  class Main {
     constructor() {
-      this.orchestrator = new SettingsOrchestrator();
-      this.ui = new UIComponent(this.orchestrator);
+      this.applier = new SettingsApplier();
+      this.ui = new UI(() => this.startProcess());
+      this.attempts = 0;
+      this.timer = null;
     }
 
-    async initialize() {
-      try {
-        Logger.log("Initializing Auto Settings v7.5");
-        Logger.log(`Device type: ${DeviceUtils.isMobile() ? "Mobile" : "Desktop"}`);
-        Logger.log(`URL: ${window.location.href}`);
+    init() {
+      // Следим за URL (SPA навигация)
+      let lastUrl = location.href;
+      setInterval(() => {
+        if (location.href !== lastUrl) {
+          lastUrl = location.href;
+          this.startProcess();
+        }
+      }, 1000);
 
-        await TimeUtils.sleep(1000);
+      this.startProcess();
+    }
 
-        this.ui.render();
-        await this.ui.runApplication();
+    startProcess() {
+      this.applier.reset();
+      this.attempts = 0;
+      this.ui.updateStatus('loading');
 
-        Logger.log("Initialization complete");
-      } catch (error) {
-        Logger.error("Initialization failed:", error);
+      if (this.timer) clearTimeout(this.timer);
+      this.loop();
+    }
+
+    async loop() {
+      const done = await this.applier.run();
+
+      if (done) {
+        this.ui.updateStatus('success');
+      } else {
+        this.attempts++;
+        if (this.attempts < CONFIG.execution.maxAttempts) {
+          this.timer = setTimeout(() => this.loop(), CONFIG.execution.retryDelay);
+        } else {
+          this.ui.updateStatus('error');
+        }
       }
     }
   }
 
-  // ==================== ENTRY POINT ====================
-  function init() {
-    if (document.readyState === "loading") {
-      document.addEventListener("DOMContentLoaded", () => {
-        new Application().initialize();
-      });
-    } else {
-      new Application().initialize();
-    }
+  // ЗАПУСК
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => new Main().init());
+  } else {
+    new Main().init();
   }
 
-  init();
 })();
