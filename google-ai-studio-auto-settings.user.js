@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         Google AI Studio - Auto Settings (Material You Design)
+// @name         Google AI Studio - Auto Settings (With Toggles)
 // @namespace    https://github.com/Stranmor/google-ai-studio-auto-settings
-// @version      15.0
-// @description  Modern UI, robust mobile logic, Material Design styling.
+// @version      15.1
+// @description  Allows disabling specific settings (like Max Output Tokens) via explicit toggles.
 // @author       Stranmor
 // @match        https://aistudio.google.com/*
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=aistudio.google.com
@@ -21,7 +21,7 @@
     defaults: {
       temperature: { value: 1.0, enabled: true },
       topP: { value: 0.95, enabled: true },
-      maxOutputTokens: { value: 8192, enabled: true },
+      maxOutputTokens: { value: 8192, enabled: true }, // Теперь можно явно выключить enabled
       mediaResolution: { value: "Default", enabled: true },
       thinkingLevel: { value: "High", enabled: true },
       // Tools
@@ -34,6 +34,7 @@
     load() {
       const saved = GM_getValue('as_config_v15', null);
       if (!saved) return GM_getValue('as_config_v14', this.defaults);
+      // Merge defaults to ensure new keys exist
       return { ...this.defaults, ...saved };
     },
     save(cfg) { GM_setValue('as_config_v15', cfg); }
@@ -66,9 +67,9 @@
       if (input.tagName !== 'INPUT') input = input.querySelector('input');
       if (!input) return false;
 
-      // Handle floating point precision issues comparison
       let currentVal = input.value;
       if (input.type === 'number') currentVal = parseFloat(currentVal);
+      // Small tolerance for float comparison
       if (Math.abs(currentVal - value) < 0.001) return true;
 
       try {
@@ -99,7 +100,6 @@
                 --as-text: #1f1f1f;
                 --as-text-sec: #444746;
                 --as-border: #e0e3e1;
-                --as-shadow: 0 4px 8px rgba(0,0,0,0.1), 0 1px 3px rgba(0,0,0,0.1);
             }
             .as-overlay {
                 position: fixed; inset: 0; background: rgba(0,0,0,0.3); z-index: 9999999;
@@ -126,26 +126,28 @@
             .as-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
             .as-row:last-child { margin-bottom: 0; }
 
-            .as-label-wrap { display: flex; align-items: center; gap: 10px; flex: 1; cursor: pointer; }
-            .as-label { font-size: 14px; color: var(--as-text); font-weight: 500; }
+            .as-label-wrap { display: flex; align-items: center; gap: 12px; flex: 1; }
+            .as-label { font-size: 14px; color: var(--as-text); font-weight: 500; cursor: pointer; }
 
             /* Inputs */
             .as-input {
                 padding: 8px 12px; border: 1px solid var(--as-border); border-radius: 8px;
-                width: 80px; font-size: 14px; text-align: center; color: var(--as-text); background: var(--as-bg);
-                transition: border 0.2s;
+                width: 90px; font-size: 14px; text-align: center; color: var(--as-text); background: var(--as-bg);
+                transition: all 0.2s;
             }
             .as-input:focus { outline: none; border-color: var(--as-primary); border-width: 2px; padding: 7px 11px; }
-            .as-select { width: 100px; padding: 7px; border-radius: 8px; border: 1px solid var(--as-border); background: var(--as-bg); cursor: pointer; }
+            .as-input:disabled { background: var(--as-surface); color: #999; border-color: transparent; }
+
+            .as-select { width: 116px; padding: 7px; border-radius: 8px; border: 1px solid var(--as-border); background: var(--as-bg); cursor: pointer; }
+            .as-select:disabled { background: var(--as-surface); color: #999; }
 
             /* Toggle Switch */
-            .as-switch { position: relative; display: inline-block; width: 40px; height: 24px; flex-shrink: 0; }
+            .as-switch { position: relative; display: inline-block; width: 36px; height: 20px; flex-shrink: 0; }
             .as-switch input { opacity: 0; width: 0; height: 0; }
             .as-slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #e0e3e1; transition: .3s; border-radius: 24px; }
-            .as-slider:before { position: absolute; content: ""; height: 16px; width: 16px; left: 4px; bottom: 4px; background-color: white; transition: .3s; border-radius: 50%; box-shadow: 0 1px 2px rgba(0,0,0,0.2); }
+            .as-slider:before { position: absolute; content: ""; height: 14px; width: 14px; left: 3px; bottom: 3px; background-color: white; transition: .3s; border-radius: 50%; box-shadow: 0 1px 2px rgba(0,0,0,0.2); }
             input:checked + .as-slider { background-color: var(--as-primary); }
             input:checked + .as-slider:before { transform: translateX(16px); }
-            input:disabled + .as-slider { opacity: 0.5; cursor: not-allowed; }
 
             .as-footer { padding: 16px 24px; border-top: 1px solid var(--as-border); background: var(--as-surface); display: flex; justify-content: flex-end; gap: 12px; }
             .as-btn { padding: 10px 24px; border-radius: 20px; font-size: 14px; font-weight: 500; border: none; cursor: pointer; transition: transform 0.1s; }
@@ -153,7 +155,6 @@
             .as-btn-sec:hover { background: rgba(11, 87, 208, 0.08); }
             .as-btn-prim { background: var(--as-primary); color: white; box-shadow: 0 2px 5px rgba(0,0,0,0.2); }
             .as-btn-prim:hover { background: #0842a0; }
-            .as-btn-prim:active { transform: scale(0.98); }
 
             /* Toast */
             .as-toast {
@@ -189,52 +190,46 @@
         setTimeout(() => toast.classList.remove('show'), 3000);
     }
 
+    // Создаем элемент управления: Слева тумблер (Применять?), Справа значение
     createControl(key, type, opts = []) {
         const cfg = Config.load();
         const item = cfg[key];
-        const label = key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase()); // camelCase -> Label
+        const label = key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase());
 
         let inputHtml = '';
-        if (type === 'toggle') {
-            // For tools, the toggle controls the Value (boolean), not Enabled state directly in this UI simplified view
-            // Actually, let's keep it consistent: Toggle enables/disables.
-            // Wait, for tools: Value IS the toggle.
-            const isTool = ['googleSearch', 'codeExecution', 'structuredOutput', 'functionCalling', 'urlContext'].includes(key);
+        const isDisabled = !item.enabled;
 
-            // Logic: The main toggle is the enable/disable for the feature.
+        if (type === 'toggle') {
+            // Для инструментов: сам тумблер справа это Value.
+            // Тумблер слева - "Применять ли эту настройку вообще".
             inputHtml = `
             <label class="as-switch">
-                <input type="checkbox" id="as-inp-${key}" ${item.value ? 'checked' : ''}>
+                <input type="checkbox" id="as-inp-${key}" ${item.value ? 'checked' : ''} ${isDisabled ? 'disabled' : ''}>
                 <span class="as-slider"></span>
             </label>`;
         } else if (type === 'select') {
-             inputHtml = `<select id="as-inp-${key}" class="as-select">
+             inputHtml = `<select id="as-inp-${key}" class="as-select" ${isDisabled ? 'disabled' : ''}>
                 ${opts.map(o => `<option value="${o}" ${o === item.value ? 'selected' : ''}>${o}</option>`).join('')}
              </select>`;
         } else {
-             inputHtml = `<input type="number" id="as-inp-${key}" value="${item.value}" class="as-input" step="${key==='temperature'?0.1:0.05}" min="0">`;
+             inputHtml = `<input type="number" id="as-inp-${key}" value="${item.value}" class="as-input" step="${key==='temperature'?0.1:1}" min="0" ${isDisabled ? 'disabled' : ''}>`;
         }
 
-        // Checkbox for "Apply this setting"
-        const enabledCheck = `<label class="as-switch" style="transform:scale(0.8);">
-            <input type="checkbox" data-key="${key}" ${item.enabled ? 'checked' : ''}>
-            <span class="as-slider"></span>
-        </label>`;
-
-        // Tools don't need a separate "Enabled" switch, their value IS the switch usually.
-        // But for consistency with v14 logic: "enabled" means "Apply this setting", "value" means "Force ON or OFF".
-
-        // Simplified UI:
-        // Left side: Label + Toggle (Enable applying).
-        // Right side: The Value (Input/Select/ToggleValue).
-
+        // Явный переключатель "Enabled" слева
         return `
         <div class="as-row">
-            <div class="as-label-wrap" onclick="this.querySelector('input').click()">
-                 <input type="checkbox" data-key="${key}" ${item.enabled ? 'checked' : ''} style="display:none" onchange="document.getElementById('as-inp-${key}').disabled = !this.checked; this.parentNode.style.opacity = this.checked ? 1 : 0.6;">
-                 <span class="as-label">${label}</span>
+            <div class="as-label-wrap">
+                 <label class="as-switch" title="Toggle to enable/disable applying this setting">
+                    <input type="checkbox" data-key="${key}" ${item.enabled ? 'checked' : ''} onchange="
+                        const el = document.getElementById('as-inp-${key}');
+                        if(el) el.disabled = !this.checked;
+                        this.closest('.as-row').style.opacity = this.checked ? 1 : 0.6;
+                    ">
+                    <span class="as-slider"></span>
+                 </label>
+                 <span class="as-label" onclick="this.previousElementSibling.querySelector('input').click()">${label}</span>
             </div>
-            <div class="as-control-wrap" style="opacity: ${item.enabled ? 1 : 0.5}">
+            <div class="as-control-wrap" style="opacity: ${item.enabled ? 1 : 0.6}">
                 ${inputHtml}
             </div>
         </div>`;
@@ -255,7 +250,9 @@
             </div>
             <div class="as-content">
                 <div class="as-group">
-                    <div class="as-group-title">Generation</div>
+                    <div class="as-group-title">Generation Parameters</div>
+                    <div style="font-size:12px; color:#666; margin-bottom:8px;">Switch OFF left toggle to let Google decide.</div>
+
                     ${this.createControl('temperature', 'number')}
                     ${this.createControl('topP', 'number')}
                     ${this.createControl('maxOutputTokens', 'number')}
@@ -264,7 +261,6 @@
                 </div>
                 <div class="as-group">
                     <div class="as-group-title">Tools (Force State)</div>
-                    <div style="font-size:12px; color:#666; margin-bottom:8px;">Switch ON to force enable, OFF to force disable. Uncheck label to ignore.</div>
                     ${this.createControl('googleSearch', 'toggle')}
                     ${this.createControl('codeExecution', 'toggle')}
                     ${this.createControl('structuredOutput', 'toggle')}
@@ -298,9 +294,9 @@
                 const inp = document.getElementById(`as-inp-${k}`);
                 let val;
 
-                if (inp.type === 'checkbox') val = inp.checked; // For tools toggles
+                if (inp.type === 'checkbox') val = inp.checked;
                 else if (inp.type === 'number') val = parseFloat(inp.value);
-                else val = inp.value; // select
+                else val = inp.value;
 
                 newCfg[k] = { enabled, value: val };
             });
@@ -317,11 +313,13 @@
 
     async preparePanel() {
         let content = document.querySelector('ms-run-settings');
-        // Check visibility on mobile
         if (content && Utils.isMobile()) {
-            const style = window.getComputedStyle(document.querySelector('.ms-right-side-panel') || document.body);
-            // Rough check if panel is hidden
-            if (document.querySelector('mat-drawer') && document.querySelector('mat-drawer').style.visibility === 'hidden') content = null;
+            // Check if drawer is technically open but hidden via styles
+            const drawer = document.querySelector('.ms-right-side-panel') || document.querySelector('mat-drawer');
+            if (drawer) {
+                const style = window.getComputedStyle(drawer);
+                if (style.display === 'none' || style.visibility === 'hidden') content = null;
+            }
         }
 
         if (content) return true;
@@ -332,10 +330,9 @@
         this.openedByScript = true;
         btn.click();
 
-        // Smart Wait
         const loaded = await Utils.waitFor('ms-run-settings');
         if (loaded) {
-             await Utils.sleep(600); // Animation buffer
+             await Utils.sleep(600);
              return true;
         }
         return false;
@@ -345,7 +342,6 @@
         let select = document.querySelector(`div[data-test-id="${ariaLabel}"] mat-select`) ||
                      document.querySelector(`mat-select[aria-label="${ariaLabel}"]`);
 
-        // Fallback for Thinking Level structure changes
         if (!select && ariaLabel === 'Thinking Level') {
              const h3 = Array.from(document.querySelectorAll('h3')).find(el => el.textContent.includes('Thinking level'));
              if (h3) select = h3.closest('.settings-item')?.querySelector('mat-select');
@@ -388,7 +384,7 @@
         if (!await this.preparePanel()) return false;
         const cfg = Config.load();
 
-        // Expand sections
+        // Expand sections logic
         const headers = Array.from(document.querySelectorAll('.settings-group-header:not(.expanded)'));
         for (const h of headers) {
             if (h.textContent.match(/(Tools|Advanced)/)) {
@@ -397,14 +393,19 @@
             }
         }
 
-        // Apply Values
+        // --- Values (Check .enabled property!) ---
         if (cfg.temperature.enabled) Utils.setInputValue(document.querySelector('div[data-test-id="temperatureSliderContainer"] input'), cfg.temperature.value);
         if (cfg.topP.enabled) Utils.setInputValue(document.querySelector('ms-slider input[max="1"]'), cfg.topP.value);
-        if (cfg.maxOutputTokens.enabled) Utils.setInputValue(document.querySelector('input[name="maxOutputTokens"]'), cfg.maxOutputTokens.value);
+
+        // !!! Max Output Tokens: Скрипт применит значение ТОЛЬКО если enabled === true
+        if (cfg.maxOutputTokens.enabled) {
+            Utils.setInputValue(document.querySelector('input[name="maxOutputTokens"]'), cfg.maxOutputTokens.value);
+        }
 
         if (cfg.mediaResolution.enabled) await this.applyDropdown(cfg.mediaResolution.value, 'mediaResolution');
         if (cfg.thinkingLevel.enabled) await this.applyDropdown(cfg.thinkingLevel.value, 'Thinking Level');
 
+        // --- Tools ---
         if (cfg.structuredOutput.enabled) await this.applyToggle('.structured-output-toggle', cfg.structuredOutput.value);
         if (cfg.codeExecution.enabled) await this.applyToggle('.code-execution-toggle', cfg.codeExecution.value);
         if (cfg.functionCalling.enabled) await this.applyToggle('.function-calling-toggle', cfg.functionCalling.value);
@@ -418,7 +419,7 @@
              }
         }
 
-        // Close on Mobile if opened by us
+        // Close on Mobile
         if (Utils.isMobile() && this.openedByScript) {
              await Utils.sleep(500);
              const closeBtn = document.querySelector('ms-run-settings button[iconname="close"]');
@@ -464,7 +465,6 @@
         `;
         const s = document.createElement('style'); s.textContent = css; document.head.appendChild(s);
 
-        // Drag Logic
         let isDrag = false, startX, startY, iLeft, iBottom;
         const move = (e) => {
             const cx = e.clientX || e.touches[0].clientX;
@@ -475,7 +475,7 @@
         };
         const stop = () => { document.removeEventListener('mousemove', move); document.removeEventListener('touchmove', move); };
         const start = (e) => {
-            if(e.button === 2) return; // Right click
+            if(e.button === 2) return;
             isDrag = false;
             startX = e.clientX || e.touches[0].clientX;
             startY = e.clientY || e.touches[0].clientY;
