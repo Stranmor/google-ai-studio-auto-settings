@@ -62,7 +62,7 @@
 
             // Parameters
             temperature: { value: 1.0, enabled: true },
-            topP: { value: 0.95, enabled: true },
+            topP: { value: 0.0, enabled: true },
             maxOutputTokens: { value: 65536, enabled: true },
             mediaResolution: { value: "Default", enabled: true },
             thinkingLevel: { value: "High", enabled: true },
